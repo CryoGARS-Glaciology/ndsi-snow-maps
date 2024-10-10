@@ -1,0 +1,13 @@
+name: ndsi-snow-maps
+channels:
+- conda-forge
+dependencies:
+- geedim
+- geopandas
+- jupyterlab
+- matplotlib
+- pandas
+- rioxarray
+- xarray
+- pip:
+  - wxee
