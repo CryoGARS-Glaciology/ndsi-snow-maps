@@ -40,20 +40,112 @@ def convert_wgs_to_utm(lon: float, lat: float):
     epsg_code = '327' + utm_band
     return epsg_code
 
+
+def calculate_aoi_coverage(im_ee, aoi_ee):
+    """
+    """
+    # Create binary image of masked (0) and unmasked (1) pixels
+    unmaskedPixels = im_ee.mask().reduce(ee.Reducer.allNonZero()).selfMask() 
+    # Calculate the area of unmasked pixels in the ROI
+    pixel_area = ee.Image.pixelArea()
+    unmaskedArea = unmaskedPixels.multiply(pixel_area).reduceRegion(
+        reducer = ee.Reducer.sum(),
+        geometry = aoi_ee,
+        scale = 30,  
+        maxPixels = 1e13
+        ).get('all')
+    # Calculate the total area of the ROI
+    aoi_area = aoi_ee.area()
+    # Calculate the percentage of the AOI covered by unmasked pixels
+    percentage_unmasked = ee.Number(unmaskedArea).divide(aoi_area).multiply(100)
+  
+    return im_ee.set('percent_AOI_coverage', percentage_unmasked).copyProperties(im_ee)
+
+
+def check_for_image_download(aoi_utm, scale, num_bands, memory_limit_bytes=10e6, dtype='float32'):
+    """
+    Determine if an ee.Image exceeds the user memory limit and must be downloaded using geedim.
+
+    Parameters
+    ----------
+    aoi_utm: geopandas.geodataframe.GeoDataFrame
+        area of interest in UTM coordinates
+    scale: int
+        the output scale in meters (e.g., 30 for 30m resolution).
+    num_bands: int
+        number of bands in the ee.Image.
+    memory_limit_bytes: int
+        user memory limit in bytes.
+    dtype: str
+        data type of the image pixels (default 'float64').
+
+    Returns
+    ----------
+    download: bool
+        True if the estimated memory exceeds the limit, False otherwise.
+    """
+    # Get bounding box coordinates from the GeoDataFrame
+    bounds = aoi_utm.total_bounds  # (minx, miny, maxx, maxy)
+    # Calculate the width and height in meters
+    width_meters = bounds[2] - bounds[0]
+    height_meters = bounds[3] - bounds[1]
+    # Calculate the number of pixels (width and height in pixels)
+    width_pixels = width_meters / scale
+    height_pixels = height_meters / scale
+    # Total number of pixels
+    total_pixels = width_pixels * height_pixels
+    # Map data type to bytes per pixel
+    dtype_size_dict = {
+        'float64': 8,  # 8 bytes per float64 value
+        'float32': 4,  # 4 bytes per float32 value
+        'int32': 4,    # 4 bytes per int32 value
+        'int16': 2,    # 2 bytes per int16 value
+        'uint8': 1     # 1 byte per uint8 value
+    }
+    # Get bytes per pixel for the specified dtype
+    bytes_per_pixel = dtype_size_dict[dtype]
+    # Estimate the total image size in bytes
+    estimated_size_bytes = total_pixels * num_bands * bytes_per_pixel
+    # Check if it exceeds the memory limit
+    download = bool(estimated_size_bytes > memory_limit_bytes)
+    return download 
+
+
 def plot_image_snow_map(im_xr, im_snow, aoi_utm, rgb_bands):
+    """
+    Plot the RGB image and snow map with the AOI boundaries overlain.
+
+    Parameters
+    ----------
+    im_xr: xarray.Dataset
+        input image with RGB data variables
+    im_snow: xarray.Dataset
+        binary map of snow
+    aoi_utm: geopandas.geodataframe.GeoDataFrame
+        area of interest in UTM CRS (the same CRS as the input images)
+    rgb_bands: list of str
+        list of im_xr data variables corresponding to the RGB bands, e.g. ["B4", "B3", "B2"]
+
+    Returns
+    ----------
+    fig: matplotlib.figure.Figure
+        output figure
+    ax: numpy.array of matplotlib.axes.Axes
+        output axes on the figure
+    """
     # Define colormap for snow
     snow_color = '#2166ac'
     snow_cmap = matplotlib.colors.ListedColormap(['white', snow_color])
     # Set up figure
     fig, ax = plt.subplots(1, 2, figsize=(12,6))
     # RGB image
-    ax[0].imshow(np.dstack([im_xr[rgb_bands[0]].data[0], im_xr[rgb_bands[1]].data[0], im_xr[rgb_bands[2]].data[0]]),
+    ax[0].imshow(np.dstack([im_xr[rgb_bands[0]].data, im_xr[rgb_bands[1]].data, im_xr[rgb_bands[2]].data]),
                 extent=(np.min(im_xr.x)/1e3, np.max(im_xr.x)/1e3, 
                         np.min(im_xr.y)/1e3, np.max(im_xr.y)/1e3))
     ax[0].set_xlabel('Easting [km]')
     ax[0].set_ylabel('Northing [km]')
     # Snow image
-    ax[1].imshow(im_snow.data[0], cmap=snow_cmap, clim=(0,1),
+    ax[1].imshow(im_snow.data, cmap=snow_cmap, clim=(0,1),
                 extent=(np.min(im_snow.x)/1e3, np.max(im_snow.x)/1e3, 
                         np.min(im_snow.y)/1e3, np.max(im_snow.y)/1e3))
     ax[1].set_xlabel('Easting [km]')    
@@ -71,24 +163,6 @@ def plot_image_snow_map(im_xr, im_snow, aoi_utm, rgb_bands):
                   np.divide(aoi_utm.geometry[0].exterior.coords.xy[1], 1e3), '-k')
 
     return fig, ax
-
-def calculate_aoi_coverage(im_ee, aoi_ee):
-    # Create binary image of masked (0) and unmasked (1) pixels
-    unmaskedPixels = im_ee.mask().reduce(ee.Reducer.allNonZero()).selfMask() 
-    # Calculate the area of unmasked pixels in the ROI
-    pixel_area = ee.Image.pixelArea()
-    unmaskedArea = unmaskedPixels.multiply(pixel_area).reduceRegion(
-        reducer = ee.Reducer.sum(),
-        geometry = aoi_ee,
-        scale = 30,  
-        maxPixels = 1e13
-        ).get('all')
-    # Calculate the total area of the ROI
-    aoi_area = aoi_ee.area()
-    # Calculate the percentage of the AOI covered by unmasked pixels
-    percentage_unmasked = ee.Number(unmaskedArea).divide(aoi_area).multiply(100)
-  
-    return im_ee.set('percent_AOI_coverage', percentage_unmasked).copyProperties(im_ee)
 
 
 def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_month, end_month, 
@@ -181,16 +255,32 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
         print("Collection name not recognized, please choose 'Sentinel-2_SR', 'Sentinel-2_TOA', or 'Landsat'")
         return
 
+    # Check if images must be downloaded
+    download_bands = list(set(rgb_bands + ndsi_bands))
+    download = check_for_image_download(aoi_utm, resolution, len(download_bands))
+    if download:
+        print('Images exceed GEE user memory limit and must be downloaded to file')
+        im_path = os.path.join(out_path, dataset)
+        if not os.path.exists(im_path):
+            os.mkdir(im_path)
+            print('Made directory for output images:', im_path)
+    
     # Define function to apply image scale factors
     def apply_scale_factors(im, dataset):
         if 'Sentinel-2' in dataset:
             return ee.Image(im).divide(1e4).copyProperties(ee.Image(im))
         elif 'Landsat' in dataset:
             return ee.Image(im).multiply(0.0000275).add(-0.2).copyProperties(ee.Image(im))
-    
+
     # Iterate over days
     print('Iterating over unique dates in collection')
     for day in tqdm(im_days):
+        # Check if snow image already exists
+        im_snow_fn = os.path.join(out_path, f'{day}_{dataset}_{site_name}_snow_map.tif')
+        if os.path.exists(im_snow_fn):
+            print(f'Snow image already exists in out_path for {day}, skipping')
+            continue
+
         # Mosaic all images from that day
         if 'Sentinel-2' in dataset:
             im_day = (gd.MaskedCollection.from_name(col_name)
@@ -213,13 +303,13 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
                 im_day = im_day_L9.composite().ee_image
 
         # Select only the bands we need
-        im_ee = im_day.select(list(set(ndsi_bands + rgb_bands))) 
+        im_ee = im_day.select(download_bands) 
 
         # Calculate percent coverage of the AOI
         im_ee = calculate_aoi_coverage(im_ee, aoi_ee)
         aoi_coverage = im_ee.get('percent_AOI_coverage').getInfo()
         if aoi_coverage < percent_aoi_coverage:
-            print(f'Image only covers {np.round(aoi_coverage, 2)} % of the AOI, skipping')
+            print(f'Image covers {np.round(aoi_coverage, 2)} % of the AOI, skipping')
             continue
 
         # Apply image scalar
@@ -228,7 +318,25 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
         im_ee = im_ee.set({'system:time_start': time.mktime(dt.timetuple()) * 1e3})
 
         # Convert ee.Image to xarray.Dataset
-        im_xr = ee.Image(im_ee).wx.to_xarray(region=aoi_ee, scale=resolution, crs='EPSG:4326')
+        if download:
+            # Convert to geedim MaskedImage to download
+            im_gd = gd.MaskedImage(ee.Image(im_ee))
+            im_fn = os.path.join(im_path, f'{day}_{dataset}_{site_name}.tif')
+            if not os.path.exists(im_fn):
+                im_gd.download(im_fn, region=aoi_ee, scale=resolution, crs='EPSG:4326', bands=download_bands)
+            # Load from file as xarray.Dataset
+            im_xr = xr.open_dataset(im_fn)
+            # Expand and rename bands                
+            for i, band in enumerate(download_bands):
+                band_data = im_xr["band_data"].isel({"band": i})
+                im_xr[band] = band_data
+            im_xr = im_xr.drop_vars("band_data").drop_dims("band")
+            im_xr = im_xr.assign_attrs({'_FillValue': np.nan})
+
+        else:
+            # Use wxee to convert image to xarray.Dataset
+            im_xr = ee.Image(im_ee).wx.to_xarray(region=aoi_ee, scale=resolution, crs='EPSG:4326')
+            im_xr = im_xr.isel(time=0)
 
         # Reproject to optimal UTM zone
         im_xr = im_xr.rio.reproject(crs_utm)
@@ -252,7 +360,6 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
         im_snow = im_snow.rio.write_crs(crs_utm)
 
         # Save binary snow image to file
-        im_snow_fn = os.path.join(out_path, f'{day}_{dataset}_{site_name}_snow_map.tif')
         im_snow.rio.to_raster(im_snow_fn)
         print('Snow image saved to file:', im_snow_fn)
 
