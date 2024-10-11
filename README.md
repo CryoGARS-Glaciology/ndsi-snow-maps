@@ -14,5 +14,7 @@ Fork and/or clone this GitHub repository. We recommend installing the required p
 
 `mamba env create -f environment.yml`
 
+Run the snow mapping pipeline using the `ndsi_snow_mapping.ipynb` notebook.
+
 ### Example results:
 !["Example snow map over Mores Creek Summit, ID"](example_snow_map_20190512_Sentinel-2_SR_MCS.png)
