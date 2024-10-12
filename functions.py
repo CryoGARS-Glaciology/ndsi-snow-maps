@@ -14,6 +14,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import xarray as xr
+from shapely.geometry import Polygon, LineString
 
 def convert_wgs_to_utm(lon: float, lat: float):
     """
@@ -158,9 +159,12 @@ def plot_image_snow_map(im_xr, im_snow, aoi_utm, rgb_bands):
     ax[1].set_ylim(ymin, ymax)
     ax[1].legend(loc='best')
     # Plot AOI
+    if type(aoi_utm.geometry[0])==Polygon:
+        aoi_x, aoi_y = aoi_utm.geometry[0].exterior.coords.xy
+    elif type(aoi_utm.geometry[0])==LineString:
+        aoi_x, aoi_y = aoi_utm.geometry[0].coords.xy
     for axis in ax:
-        axis.plot(np.divide(aoi_utm.geometry[0].exterior.coords.xy[0], 1e3),
-                  np.divide(aoi_utm.geometry[0].exterior.coords.xy[1], 1e3), '-k')
+        axis.plot(np.divide(aoi_x, 1e3), np.divide(aoi_y, 1e3), '-k')
 
     return fig, ax
 
@@ -209,8 +213,8 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
     # Reformat AOI for querying GEE
     crs_utm = f"EPSG:{aoi_utm.crs.to_epsg()}"
     aoi_latlon = aoi_utm.to_crs("EPSG:4326")
-    aoi_ee = ee.Geometry.Polygon(list(zip(aoi_latlon.geometry[0].exterior.coords.xy[0], 
-                                          aoi_latlon.geometry[0].exterior.coords.xy[1])))
+    aoi_ee = ee.Geometry.Polygon(list(zip(aoi_latlon.geometry[0].coords.xy[0], 
+                                          aoi_latlon.geometry[0].coords.xy[1])))
 
     # Get unique days in image collection, define collection-specific characteristics
     print(f'Querying GEE for {dataset} images')
