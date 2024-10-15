@@ -2,3 +2,5 @@
 __pychache__
 __pycache__/functions.cpython-313.pyc
 .DS_Store
+
+re-export_files.ipynb

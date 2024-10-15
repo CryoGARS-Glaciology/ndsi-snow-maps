@@ -361,7 +361,7 @@ def query_imagery_classify_snow(aoi_utm, dataset, start_date, end_date, start_mo
                                         'NDSI threshold': ndsi_threshold
                                         })
         # make sure CRS is set
-        im_snow = im_snow.rio.write_crs(crs_utm)
+        im_snow = im_snow.rio.write_crs(crs_utm, dtype='int16')
 
         # Save binary snow image to file
         im_snow.rio.to_raster(im_snow_fn)
